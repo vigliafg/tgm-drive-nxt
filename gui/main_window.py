@@ -19,7 +19,6 @@ from telegram_client import TelegramClientThread
 from gui.cloud_model import CloudFileModel, TagDelegate
 from gui.transfer_manager import TransferManager
 from gui.transfer_dialog import TransferDialog
-from gui.favorite_channels_bar import FavoriteChannelsBar
 from gui.destination_dialog import DestinationDialog
 from gui.settings_dialog import SettingsDialog
 from gui.tag_chip_widget import TagChipWidget
@@ -439,13 +438,6 @@ class MainWindow(QMainWindow):
             if tag:
                 self._pending_tags.setdefault(Path(path).name, []).append(tag)
         self.transfer_dialog.show()
-
-    def _on_cloud_files_dropped(self, files: list):
-        for f in files:
-            ch_id = f.get("channel_id") or self.channel_id
-            self.transfer_manager.add_download(ch_id, f["message_id"], f["filename"], str(self.download_dir), f.get("original_filename", ""))
-        if files:
-            self.transfer_dialog.show()
 
     def _on_download(self):
         indexes = self.cloud_table.selectionModel().selectedRows()
