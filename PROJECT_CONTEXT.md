@@ -15,6 +15,7 @@
 - **Transfer Manager**: `TransferManager` (QObject) with queue, speed tracking, and progress signals
 - **Transfer Dialog**: `TransferDialog` (QDialog) showing queue, progress bars, speed info, auto-clear
 - **Setup Wizard**: 5-page wizard (Welcome → Credentials → OTP → Channel → Favorites) for first-run setup
+- **Install Scripts**: Platform-specific installers (`scripts/install-linux.sh`, `scripts/install-macos.sh`, `scripts/install-windows.bat`) that create venv, install deps, and set up a global `tgm-drive` launcher command
 
 ---
 
@@ -35,6 +36,10 @@
 ├── LICENSE                    # GPL-3.0
 ├── .gitignore
 ├── .gitattributes
+├── scripts/
+│   ├── install-linux.sh       # Installer & launcher per Linux → ~/.local/bin/tgm-drive
+│   ├── install-macos.sh       # Installer & launcher per macOS → /usr/local/bin/tgm-drive
+│   └── install-windows.bat    # Installer & launcher per Windows → scripts/tgm-drive.bat
 └── gui/
     ├── __init__.py             # Empty (package marker)
     ├── auth_dialog.py          # Initial auth dialog (API ID, Hash, Phone)
@@ -80,6 +85,7 @@
 | Channel creation from within the app | ✅ |
 | Session persistence (avoids re-auth on restart) | ✅ |
 | DB auto-migration (ALTER TABLE for new columns) | ✅ |
+| Global launcher command `tgm-drive` via install scripts | ✅ |
 
 ---
 
@@ -114,6 +120,10 @@
 ## 7. Quick Commands
 
 ```bash
+# Dopo l'installazione con lo script:
+tgm-drive
+
+# In sviluppo (manuale):
 cd /home/vigliafg/Documenti/GitHub/tgm-drive-nxt
 source .venv/bin/activate
 python main.py
@@ -121,4 +131,4 @@ python main.py
 
 ---
 
-*Updated: 2026-06-14*
+*Updated: 2026-06-14 (install scripts added)*

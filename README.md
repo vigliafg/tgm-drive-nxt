@@ -73,31 +73,66 @@ Applicazione desktop in **PyQt6** che trasforma uno o più canali Telegram priva
 
 ## 🚀 Installazione
 
-### 1. Clona il repository
+### Metodo Rapido (consigliato)
+
+Usa lo script di installazione per il tuo sistema operativo. Lo script crea automaticamente l'ambiente virtuale, installa le dipendenze e configura il launcher globale **`tgm-drive`**.
+
+#### Linux
 
 ```bash
 git clone https://github.com/tuouser/tgm-drive-nxt.git
 cd tgm-drive-nxt
+chmod +x scripts/install-linux.sh
+./scripts/install-linux.sh
 ```
 
-### 2. Crea un virtual environment
+Poi avvia l'app da qualsiasi terminale con:
 
 ```bash
+tgm-drive
+```
+
+> **Nota:** Se `~/.local/bin` non è nel tuo PATH, aggiungi `export PATH="$HOME/.local/bin:$PATH"` al tuo `~/.bashrc` o `~/.zshrc`.
+
+#### macOS
+
+```bash
+git clone https://github.com/tuouser/tgm-drive-nxt.git
+cd tgm-drive-nxt
+chmod +x scripts/install-macos.sh
+./scripts/install-macos.sh
+```
+
+Poi avvia l'app da qualsiasi terminale con:
+
+```bash
+tgm-drive
+```
+
+#### Windows
+
+Apri **PowerShell** o **Prompt dei comandi** nella cartella del progetto e lancia:
+
+```cmd
+scripts\install-windows.bat
+```
+
+Aggiungi la cartella `scripts\` al PATH di sistema (le istruzioni appaiono al termine dell'installazione), poi avvia l'app con:
+
+```cmd
+tgm-drive
+```
+
+### Metodo Manuale (sviluppatori)
+
+```bash
+git clone https://github.com/tuouser/tgm-drive-nxt.git
+cd tgm-drive-nxt
 python3 -m venv .venv
-source .venv/bin/activate   # Linux/Mac
+source .venv/bin/activate   # Linux/macOS
 # oppure
 .venv\Scripts\activate     # Windows
-```
-
-### 3. Installa le dipendenze
-
-```bash
 pip install -r requirements.txt
-```
-
-### 4. Avvia l'applicazione
-
-```bash
 python main.py
 ```
 
@@ -201,6 +236,10 @@ La finestra **📦 Trasferimenti** mostra:
 ├── TAG_SYSTEM_DESIGN.md       # Documento di progettazione del sistema di tagging
 ├── GO_REFACTOR_DESIGN.md      # Studio di fattibilità refactoring Python → Go
 ├── FYNE_COMPROMISE.md         # Analisi compromessi GUI Fyne vs PyQt6
+├── scripts/
+│   ├── install-linux.sh       # Installer & launcher per Linux
+│   ├── install-macos.sh       # Installer & launcher per macOS
+│   └── install-windows.bat    # Installer & launcher per Windows
 └── gui/
     ├── __init__.py
     ├── auth_dialog.py         # Dialogo autenticazione iniziale (API ID, Hash, Phone)
@@ -212,8 +251,7 @@ La finestra **📦 Trasferimenti** mostra:
     ├── setup_wizard.py        # Wizard di primo avvio (5 pagine guidate)
     ├── settings_dialog.py     # Impostazioni: UI, Telegram, Canali Preferiti, Tags
     ├── destination_dialog.py  # Dialogo selezione canale destinazione per copia/sposta
-    ├── tag_chip_widget.py     # Widget compatto chip/pill per filtraggio tag
-    └── favorite_channels_bar.py  # Barra orizzontale canali preferiti (widget standalone)
+    └── tag_chip_widget.py     # Widget compatto chip/pill per filtraggio tag
 ```
 
 ---
@@ -234,9 +272,8 @@ pip install --upgrade PyQt6
 - Verifica che il **numero di telefono** sia in formato internazionale (`+39...` per l'Italia)
 - Controlla la connessione internet
 - Se hai cambiato password o attivato 2FA, rimuovi la sessione e riavvia:
-  ```bash
-  rm ~/.tgm_drive/tgm_drive.session
-  python main.py
+  ```bash    rm ~/.tgm_drive/tgm_drive.session
+  tgm-drive
   ```
 
 ### File troppo grandi
@@ -293,6 +330,15 @@ cd tgm-drive-nxt
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+```
+
+### Avvio rapido (sviluppo)
+
+Dopo il setup, puoi usare il launcher globale `tgm-drive` installato con lo script, oppure avviare direttamente:
+
+```bash
+source .venv/bin/activate  # solo la prima volta
+python main.py
 ```
 
 ### Documentazione per sviluppatori

@@ -40,3 +40,6 @@ Thumbs.db
 
 # Download temporanei
 TGM_Drive_Downloads/
+
+# Launcher Windows generato dall'installer (contiene path locale)
+scripts/tgm-drive.bat
