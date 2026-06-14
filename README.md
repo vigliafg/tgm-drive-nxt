@@ -120,17 +120,21 @@ tgm-drive
 
 #### Windows
 
-Apri **PowerShell** o **Prompt dei comandi** nella cartella del progetto e lancia:
+Apri **PowerShell** o **Prompt dei comandi**:
 
 ```cmd
+git clone https://github.com/tuouser/tgm-drive-nxt.git
+cd tgm-drive-nxt
 scripts\install-windows.bat
 ```
 
-Aggiungi la cartella `scripts\` al PATH di sistema (le istruzioni appaiono al termine dell'installazione), poi avvia l'app con:
+Al termine, avvia l'app da qualsiasi terminale con:
 
 ```cmd
 tgm-drive
 ```
+
+> **Nota:** Lo script aggiunge automaticamente `tgm-drive` al PATH. Se non funziona, aggiungi manualmente la cartella `scripts\` al PATH di sistema.
 
 ### Metodo Manuale (sviluppatori)
 
