@@ -22,6 +22,9 @@ from gui.transfer_dialog import TransferDialog
 from gui.destination_dialog import DestinationDialog
 from gui.settings_dialog import SettingsDialog
 from gui.tag_chip_widget import TagChipWidget
+from gui.services.transfer_chain_service import TransferChainService
+from gui.services.file_service import extract_original_filename
+from gui.services.tag_service import PendingTagManager
 from config import load_config, save_config
 
 
@@ -108,16 +111,18 @@ class MainWindow(QMainWindow):
         self._channel_filter = 0  # 0 = tutti i canali
         self._drop_upload_channel_id = self.channel_id
         self._drop_download_dir = self.download_dir
-        self._pending_copy_ops: dict = {}  # op_id → {dest_channel, source_channel, message_id, is_move, original_filename}
-        self._suppress_deleted_refresh: set = set()  # message_id di move già refresh-ati dal dest handler
         self._current_tag_filter: str = ""  # "" = nessun filtro (mostra tutti)
-        self._pending_tags: dict[str, list[str]] = {}  # filename → [tag1, tag2, ...] (per upload con tag)
+        self._pending_tags = PendingTagManager()  # tag da applicare dopo upload
         self._tag_delegate = TagDelegate()
 
         self.transfer_manager = TransferManager(self.tg_client)
         self.transfer_dialog = TransferDialog(self.transfer_manager, self)
         self.transfer_manager.op_added.connect(self._on_transfer_op_added)
         self.transfer_manager.op_done.connect(self._on_transfer_done)
+
+        self.chain_service = TransferChainService(self.db, self.transfer_manager, self.tg_client)
+        self.chain_service.chain_done.connect(self._on_chain_done)
+        self.chain_service.chain_progress.connect(self._on_chain_progress)
 
         self.tray_icon = QSystemTrayIcon(self)
         tray_icon = QIcon.fromTheme("document-save")
@@ -136,6 +141,7 @@ class MainWindow(QMainWindow):
         self._load_channel_names()
         self._load_favorite_channels()
         self._load_tag_list()
+        self.chain_service.cleanup_orphaned_files()
         self._refresh_cloud()
 
     def _build_ui(self):
@@ -416,7 +422,7 @@ class MainWindow(QMainWindow):
         for path in paths:
             self.transfer_manager.add_upload(ch_id, path)
             if tag:
-                self._pending_tags.setdefault(Path(path).name, []).append(tag)
+                self._pending_tags.add(Path(path).name, tag)
         self.transfer_dialog.show()
 
     def _on_drop_cloud_download(self, files: list):
@@ -436,7 +442,7 @@ class MainWindow(QMainWindow):
         for path in paths:
             self.transfer_manager.add_upload(self.channel_id, path)
             if tag:
-                self._pending_tags.setdefault(Path(path).name, []).append(tag)
+                self._pending_tags.add(Path(path).name, tag)
         self.transfer_dialog.show()
 
     def _on_download(self):
@@ -505,21 +511,18 @@ class MainWindow(QMainWindow):
             f"{'Spostamento' if is_move else 'Copia'} di {len(files)} file in corso..."
         )
 
-        for file in files:
-            source_ch = file.channel_id if file.channel_id else self.channel_id
-            display_name = file.original_filename or file.filename
-            op_id = self.transfer_manager.add_download(
-                source_ch, file.message_id, file.filename,
-                str(self.download_dir), file.original_filename
-            )
-            # Marca il download come operazione intermedia: non mostrare nella tabella
-            self._pending_copy_ops[op_id] = {
-                'dest_channel': dest_channel_id,
-                'source_channel': source_ch,
+        files_data = [
+            {
                 'message_id': file.message_id,
-                'is_move': is_move,
-                'original_filename': display_name,
+                'filename': file.filename,
+                'original_filename': file.original_filename or file.filename,
+                'channel_id': file.channel_id if file.channel_id else self.channel_id,
             }
+            for file in files
+        ]
+        self.chain_service.start_chain(
+            files_data, dest_channel_id, is_move, str(self.download_dir)
+        )
 
         self.transfer_dialog.show()
 
@@ -531,14 +534,7 @@ class MainWindow(QMainWindow):
     def _on_file_deleted(self, success, msg_id):
         if success:
             self.db.delete_file(int(msg_id))
-            # Salta il refresh se già gestito dal move handler (dest == current)
-            if int(msg_id) in self._suppress_deleted_refresh:
-                self._suppress_deleted_refresh.discard(int(msg_id))
-                return
             self._refresh_cloud()
-        else:
-            # Pulisci il set anche in caso di fallimento per evitare leak
-            self._suppress_deleted_refresh.discard(int(msg_id))
 
     def _refresh_cloud(self):
         if not self.channel_id:
@@ -565,7 +561,7 @@ class MainWindow(QMainWindow):
             # Inserisci i file nel DB con il channel_id corretto
             for f in files:
                 caption = f.get("caption", "")
-                original_filename = self._extract_original_filename(caption, f["filename"])
+                original_filename = extract_original_filename(caption)
                 self.db.insert_file(
                     message_id=f["message_id"],
                     filename=f["filename"],
@@ -587,12 +583,9 @@ class MainWindow(QMainWindow):
     def _on_file_list_ready(self, files: list):
         for f in files:
             caption = f.get("caption", "")
-            original_filename = self._extract_original_filename(caption, f["filename"])
+            original_filename = extract_original_filename(caption)
             # Applica tag pendente se presente
-            tag_list = self._pending_tags.get(f["filename"], [])
-            pending_tag = tag_list.pop(0) if tag_list else ""
-            if not tag_list:
-                self._pending_tags.pop(f["filename"], None)
+            pending_tag = self._pending_tags.pop(f["filename"])
             self.db.insert_file(
                 message_id=f["message_id"],
                 filename=f["filename"],
@@ -605,22 +598,6 @@ class MainWindow(QMainWindow):
             if pending_tag:
                 self.db.update_file_tag(f["message_id"], pending_tag)
         self._refresh_file_list()
-
-    def _extract_original_filename(self, caption: str, telegram_filename: str) -> str:
-        """Estrae il nome file originale dalla caption del messaggio Telegram.
-        Se la caption termina con un'estensione valida (.ext),
-        la usa come original_filename. Altrimenti restituisce stringa vuota."""
-        import re
-        if not caption or not caption.strip():
-            return ""
-        caption = caption.strip()
-        # Deve assomigliare a un nome file: no newline/slash/backslash,
-        # e terminare con .estensione (1-6 caratteri alfanumerici)
-        if '\n' in caption or '/' in caption or '\\' in caption:
-            return ""
-        if re.search(r'\.[a-zA-Z0-9]{1,6}$', caption):
-            return caption
-        return ""
 
     def _refresh_local_tree(self):
         # Salva i percorsi delle directory attualmente espanse
@@ -733,7 +710,7 @@ class MainWindow(QMainWindow):
 
     def _on_transfer_op_added(self, op):
         # Non mostrare nella tabella i download intermedi di copia/sposta
-        if op.op_type == "download" and op.op_id in self._pending_copy_ops:
+        if op.op_type == "download" and self.db.get_chain_by_download_op(op.op_id):
             return
         size = 0
         mime_type = ""
@@ -754,52 +731,15 @@ class MainWindow(QMainWindow):
     def _on_transfer_done(self, op_id: str, op_type: str, success: bool, msg: str, filename: str):
         self.cloud_model.remove_transfer(op_id)
 
-        # Gestione catena copia/sposta: download → upload → (delete)
-        if op_id in self._pending_copy_ops:
-            info = self._pending_copy_ops.pop(op_id)
-            if op_type == "download" and success:
-                # Download completato: avvia upload verso il canale di destinazione
-                local_path = msg  # percorso file scaricato
-                new_op_id = self.transfer_manager.add_upload(
-                    info['dest_channel'], local_path
-                )
-                self._pending_copy_ops[new_op_id] = info
-                self.transfer_dialog.show()
-            elif op_type == "upload" and success:
-                # Upload completato: pulisci file temp e, se sposta, elimina sorgente
-                try:
-                    Path(msg).unlink(missing_ok=True)
-                except OSError:
-                    pass
-                if info['is_move']:
-                    # Se dest == current, _on_file_deleted farebbe un refresh ridondante
-                    if info['dest_channel'] == self.channel_id:
-                        self._suppress_deleted_refresh.add(info['message_id'])
-                    self.tg_client.delete_file(
-                        info['source_channel'], info['message_id']
-                    )
-                self._notify_transfer_done(
-                    "upload", info.get('original_filename', filename)
-                )
-                # Refresh: canale destinazione (per popolare DB e aggiornare vista).
-                # Chiamiamo UN SOLO metodo per evitare race condition:
-                # _refresh_channel_db disconnette _on_file_list_ready e usa un handler one-shot.
-                if info['dest_channel'] == self.channel_id:
-                    self._refresh_cloud()
-                else:
-                    self._refresh_channel_db(info['dest_channel'])
-            elif not success:
-                # Fallimento: notifica errore e pulisci eventuale file temporaneo
-                self._notify_transfer_failed(
-                    op_type, info.get('original_filename', filename), msg
-                )
-                if op_type == "upload":
-                    try:
-                        Path(msg).unlink(missing_ok=True)
-                    except OSError:
-                        pass
-            # Non chiamare _refresh_cloud / _refresh_local_tree qui:
-            # per download non serve, per upload è già chiamato sopra
+        # La gestione catena copy/move è delegata a TransferChainService
+        # (il servizio ascolta self.transfer_manager.op_done in parallelo).
+        # Qui gestiamo solo upload/download singoli (non di catena).
+
+        # Verifica rapida: se questo op_id appartiene a una catena, saltiamo
+        # (il chain_service gestirà refresh e notifiche)
+        if op_type == 'download' and self.db.get_chain_by_download_op(op_id):
+            return
+        if op_type == 'upload' and self.db.get_chain_by_upload_op(op_id):
             return
 
         if success:
@@ -820,19 +760,32 @@ class MainWindow(QMainWindow):
                 3000
             )
 
-    def _notify_transfer_failed(self, op_type: str, filename: str, error_msg: str):
-        """Notifica errore per operazioni copia/sposta fallite."""
-        label = "Upload" if op_type == "upload" else "Download"
-        short_error = error_msg[:120] if error_msg else "errore sconosciuto"
-        self.status_bar.showMessage(f"❌ {label} fallito: {filename} — {short_error}")
-        QApplication.beep()
-        if QSystemTrayIcon.isSystemTrayAvailable():
-            self.tray_icon.showMessage(
-                "TGM Drive — Operazione fallita",
-                f"{label} di '{filename}' fallito\n{short_error}",
-                QSystemTrayIcon.MessageIcon.Warning,
-                5000
-            )
+    def _on_chain_done(self, chain_id: str, success: bool, filename: str, error_msg: str):
+        """Chiamato quando UNA catena completa (successo o fallimento)."""
+        if success:
+            self._notify_transfer_done('upload', filename)
+            # Aggiorna il DB e la vista per il canale di destinazione
+            chain = self.db.get_chain(chain_id)
+            if chain:
+                if chain.dest_channel == self.channel_id:
+                    self._refresh_cloud()
+                else:
+                    self._refresh_channel_db(chain.dest_channel)
+        else:
+            short_error = error_msg[:120] if error_msg else 'errore sconosciuto'
+            self.status_bar.showMessage(f"❌ Copia/Sposta fallito: {filename} — {short_error}")
+            QApplication.beep()
+            if QSystemTrayIcon.isSystemTrayAvailable():
+                self.tray_icon.showMessage(
+                    "TGM Drive — Operazione fallita",
+                    f"Copia/Sposta di '{filename}' fallito\n{short_error}",
+                    QSystemTrayIcon.MessageIcon.Warning,
+                    5000
+                )
+
+    def _on_chain_progress(self, chain_id: str, status: str):
+        """Opzionale: aggiorna la status bar con lo stato corrente della catena."""
+        pass  # Per ora silent, si può arricchire dopo
 
     def _show_transfer_dialog(self):
         self.transfer_dialog.show()

@@ -31,6 +31,7 @@ class TelegramClientThread(QThread):
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._channel = None
         self._otp_event: Optional[asyncio.Event] = None
+        self._wake_event: Optional[asyncio.Event] = None
         self._otp_code = ""
         self._otp_phone = ""
         self._running = True
@@ -50,6 +51,7 @@ class TelegramClientThread(QThread):
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
         self._otp_event = asyncio.Event()
+        self._wake_event = asyncio.Event()
         self._client = TelegramClient(
             self.session_path, self.api_id, self.api_hash
         )
@@ -78,9 +80,16 @@ class TelegramClientThread(QThread):
                 )
 
             self.connected.emit(True, "Connesso")
-            # Keep loop running until stop() is called
+            # Event-driven idle: si sveglia solo quando _enqueue() riceve lavoro.
+            # Timeout di 5s come safety net (heartbeat / keepalive).
             while self._running:
-                self._loop.run_until_complete(asyncio.sleep(0.1))
+                self._wake_event.clear()
+                try:
+                    self._loop.run_until_complete(
+                        asyncio.wait_for(self._wake_event.wait(), timeout=5.0)
+                    )
+                except asyncio.TimeoutError:
+                    pass  # timeout, nessun lavoro — il loop riprende
         except Exception as e:
             self.error_occurred.emit(str(e))
             self.connected.emit(False, str(e))
@@ -97,6 +106,7 @@ class TelegramClientThread(QThread):
     def _enqueue(self, coro):
         if self._loop and self._loop.is_running():
             asyncio.run_coroutine_threadsafe(coro, self._loop)
+            self._loop.call_soon_threadsafe(self._wake_event.set)
         else:
             self.error_occurred.emit("Client non connesso")
 
@@ -226,4 +236,6 @@ class TelegramClientThread(QThread):
 
     def stop(self):
         self._running = False
+        if self._wake_event and self._loop and self._loop.is_running():
+            self._loop.call_soon_threadsafe(self._wake_event.set)
         self.wait(5000)

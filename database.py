@@ -24,10 +24,30 @@ class FileRecord:
     original_filename: str = ""
 
 
+@dataclass
+class ChainRecord:
+    chain_id: str
+    source_channel: int
+    dest_channel: int
+    message_id: int
+    filename: str
+    original_name: str
+    is_move: bool
+    status: str
+    download_op_id: str
+    upload_op_id: str
+    temp_file_path: str
+    error_msg: str
+    created_at: str
+    updated_at: str
+
+
 class Database:
     def __init__(self, db_path: str = None):
         self.db_path = str(db_path or DB_FILE)
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        # Skip directory creation for special SQLite paths like ":memory:"
+        if not self.db_path.startswith(":"):
+            os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._init_db()
 
     def _connect(self):
@@ -36,7 +56,8 @@ class Database:
         return conn
 
     def _init_db(self):
-        with self._connect() as conn:
+        conn = self._connect()
+        try:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS files (
@@ -75,37 +96,69 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_channel_id ON files(channel_id)
                 """
             )
-        # Channels table
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS channels (
-                channel_id INTEGER PRIMARY KEY,
-                channel_name TEXT NOT NULL
+            # Channels table
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS channels (
+                    channel_id INTEGER PRIMARY KEY,
+                    channel_name TEXT NOT NULL
+                )
+                """
             )
-            """
-        )
-        # Favorite channels table
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS favorite_channels (
-                channel_id INTEGER PRIMARY KEY,
-                channel_name TEXT NOT NULL,
-                display_name TEXT NOT NULL,
-                sort_order INTEGER DEFAULT 0
+            # Favorite channels table
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS favorite_channels (
+                    channel_id INTEGER PRIMARY KEY,
+                    channel_name TEXT NOT NULL,
+                    display_name TEXT NOT NULL,
+                    sort_order INTEGER DEFAULT 0
+                )
+                """
             )
-            """
-        )
-        # Tags table
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS tags (
-                tag_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tag_name TEXT NOT NULL UNIQUE,
-                sort_order INTEGER DEFAULT 0
+            # Tags table
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS tags (
+                    tag_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tag_name TEXT NOT NULL UNIQUE,
+                    sort_order INTEGER DEFAULT 0
+                )
+                """
             )
-            """
-        )
-        conn.commit()
+            # Transfer chains table — persistente per copy/move tra canali
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS transfer_chains (
+                    chain_id TEXT PRIMARY KEY,
+                    source_channel INTEGER NOT NULL,
+                    dest_channel INTEGER NOT NULL,
+                    message_id INTEGER NOT NULL,
+                    filename TEXT NOT NULL,
+                    original_name TEXT DEFAULT '',
+                    is_move INTEGER DEFAULT 0,
+                    status TEXT DEFAULT 'pending',
+                    download_op_id TEXT DEFAULT '',
+                    upload_op_id TEXT DEFAULT '',
+                    temp_file_path TEXT DEFAULT '',
+                    error_msg TEXT DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_chain_status ON transfer_chains(status)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_chain_download_op ON transfer_chains(download_op_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_chain_upload_op ON transfer_chains(upload_op_id)"
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
     def insert_file(
         self,
@@ -413,3 +466,99 @@ class Database:
                     (tag_name,),
                 ).fetchall()
             return [FileRecord(**dict(r)) for r in rows]
+
+    # ── Transfer chains ───────────────────────────────────────────
+
+    def insert_chain(self, chain_id: str, source_channel: int, dest_channel: int,
+                     message_id: int, filename: str, original_name: str = "",
+                     is_move: bool = False) -> None:
+        """Inserisce una nuova catena con status='pending'."""
+        now = datetime.now().isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO transfer_chains
+                    (chain_id, source_channel, dest_channel, message_id, filename,
+                     original_name, is_move, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (chain_id, source_channel, dest_channel, message_id, filename,
+                 original_name, 1 if is_move else 0, now, now),
+            )
+            conn.commit()
+
+    def update_chain_status(self, chain_id: str, status: str, **kwargs) -> None:
+        """Aggiorna status e campi opzionali (download_op_id, upload_op_id,
+        temp_file_path, error_msg)."""
+        now = datetime.now().isoformat()
+        allowed = {'download_op_id', 'upload_op_id', 'temp_file_path', 'error_msg'}
+        sets = ['status = ?', 'updated_at = ?']
+        params = [status, now]
+        for key, val in kwargs.items():
+            if key in allowed:
+                sets.append(f'{key} = ?')
+                params.append(val)
+        params.append(chain_id)
+        with self._connect() as conn:
+            conn.execute(
+                f"UPDATE transfer_chains SET {', '.join(sets)} WHERE chain_id = ?",
+                params,
+            )
+            conn.commit()
+
+    def get_chain(self, chain_id: str) -> Optional[ChainRecord]:
+        """Recupera una catena per ID."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM transfer_chains WHERE chain_id = ?", (chain_id,)
+            ).fetchone()
+            if row:
+                d = dict(row)
+                d['is_move'] = bool(d['is_move'])
+                return ChainRecord(**d)
+            return None
+
+    def get_chain_by_download_op(self, op_id: str) -> Optional[ChainRecord]:
+        """Recupera la catena associata a un'operazione di download."""
+        if not op_id:
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM transfer_chains WHERE download_op_id = ?", (op_id,)
+            ).fetchone()
+            if row:
+                d = dict(row)
+                d['is_move'] = bool(d['is_move'])
+                return ChainRecord(**d)
+            return None
+
+    def get_chain_by_upload_op(self, op_id: str) -> Optional[ChainRecord]:
+        """Recupera la catena associata a un'operazione di upload."""
+        if not op_id:
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM transfer_chains WHERE upload_op_id = ?", (op_id,)
+            ).fetchone()
+            if row:
+                d = dict(row)
+                d['is_move'] = bool(d['is_move'])
+                return ChainRecord(**d)
+            return None
+
+    def get_chains_by_status(self, statuses: List[str]) -> List[ChainRecord]:
+        """Recupera tutte le catene con gli status specificati."""
+        if not statuses:
+            return []
+        placeholders = ', '.join(['?'] * len(statuses))
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM transfer_chains WHERE status IN ({placeholders})",
+                statuses,
+            ).fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                d['is_move'] = bool(d['is_move'])
+                result.append(ChainRecord(**d))
+            return result

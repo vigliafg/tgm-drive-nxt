@@ -6,7 +6,8 @@ from PyQt6.QtWidgets import (
     QTabWidget, QWidget, QLabel, QLineEdit,
     QPushButton, QSpinBox, QComboBox, QMessageBox,
     QListWidget, QListWidgetItem, QGroupBox,
-    QSplitter, QFrame, QFileDialog, QSizePolicy
+    QSplitter, QFrame, QFileDialog, QSizePolicy,
+    QInputDialog
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 

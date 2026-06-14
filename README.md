@@ -32,6 +32,10 @@ Applicazione desktop in **PyQt6** che trasforma uno o più canali Telegram priva
 - **📋 Copia/📦 Sposta** file tra canali con operazioni in due fasi (download → upload)
 - **Filtro canale**: visualizza file di un canale specifico o di tutti i canali
 
+### Resilienza
+- **Catena Copy/Move persistente**: lo stato di ogni operazione copy/move è salvato in SQLite. Se l'app crasha, al riavvio i file temporanei vengono puliti e le operazioni interrotte vengono notificate.
+- **Event-driven client Telegram**: il loop asyncio usa `asyncio.Event` invece del polling a 100ms → latenza zero, CPU idle ~0%.
+
 ### Sistema di Tag
 - **🏷️ Tag singolo per file**: assegna un tag a ciascun file durante l'upload o successivamente
 - **Filtro per tag cross-channel**: filtra i file per tag su tutti i canali contemporaneamente
@@ -52,6 +56,11 @@ Applicazione desktop in **PyQt6** che trasforma uno o più canali Telegram priva
 - **Barra di stato**: messaggi informativi in tempo reale
 - **Scorciatoie**: `F5` per aggiornare, `Delete` per eliminare file selezionati
 - **Checkbox di selezione multipla**: seleziona più file con le checkbox e applica azioni batch
+
+### Test
+- **426 test**, tutti passanti, zero flaky
+- **68% coverage** complessivo, **100% sui moduli di logica pura** (`database.py`, `config.py`, `gui/services/`)
+- CI via GitHub Actions con matrix Python 3.10/3.11/3.12
 
 ### Tecnologia
 - **Autenticazione MTProto** tramite [Telethon](https://github.com/LonamiWebs/Telethon) (account utente, non bot)
@@ -228,20 +237,49 @@ La finestra **📦 Trasferimenti** mostra:
 .
 ├── main.py                    # Punto di ingresso, gestione OTP, avvio MainWindow
 ├── config.py                  # Gestione configurazione JSON (~/.tgm_drive/config.json)
-├── database.py                # Database SQLite: CRUD, ricerca, tag, canali
-├── telegram_client.py         # Client MTProto (Telethon) in QThread dedicato
+├── database.py                # Database SQLite: CRUD, ricerca, tag, canali, transfer_chains
+├── telegram_client.py         # Client MTProto (Telethon) in QThread dedicato, event-driven
 ├── requirements.txt           # Dipendenze Python
+├── requirements-test.txt      # Dipendenze per test (pytest, pytest-qt, pytest-cov)
 ├── README.md                  # Questo file
 ├── PROJECT_CONTEXT.md         # Contesto completo del progetto per sviluppatori
 ├── TAG_SYSTEM_DESIGN.md       # Documento di progettazione del sistema di tagging
+├── TRANSFER_CHAIN_DESIGN.md   # Documento di progettazione catena copy/move persistente
 ├── GO_REFACTOR_DESIGN.md      # Studio di fattibilità refactoring Python → Go
 ├── FYNE_COMPROMISE.md         # Analisi compromessi GUI Fyne vs PyQt6
+├── .github/workflows/
+│   └── pytest.yml             # CI: test automatici su push/PR (matrix Python 3.10/11/12)
 ├── scripts/
 │   ├── install-linux.sh       # Installer & launcher per Linux
 │   ├── install-macos.sh       # Installer & launcher per macOS
-│   └── install-windows.bat    # Installer & launcher per Windows
+│   ├── install-windows.bat    # Installer & launcher per Windows
+│   ├── build-linux.sh         # Build eseguibile standalone (Linux)
+│   ├── build-macos.sh         # Build eseguibile standalone (macOS)
+│   └── build-windows.ps1      # Build eseguibile standalone (Windows)
+├── tests/
+│   ├── conftest.py            # Fixture condivise (DB, mock, QApplication)
+│   ├── unit/
+│   │   ├── test_config.py     # 11 test — load/save/merge config
+│   │   ├── test_database.py   # 56 test — CRUD, search, tag, migrations, transfer_chains
+│   │   ├── test_cloud_model.py           # 37 test
+│   │   ├── test_transfer_manager.py      # 24 test
+│   │   ├── test_transfer_chain_service.py # 43 test — catena copy/move persistente
+│   │   ├── test_file_service.py          # 28 test — extract_original_filename
+│   │   └── test_tag_service.py           # 22 test — PendingTagManager
+│   └── ui/
+│       ├── test_auth_dialog.py          # 15 test
+│       ├── test_channel_dialog.py       # 35 test
+│       ├── test_destination_dialog.py   # 18 test
+│       ├── test_settings_dialog.py      # 68 test
+│       ├── test_tag_chip_widget.py      # 27 test
+│       └── test_transfer_dialog.py      # 28 test
 └── gui/
     ├── __init__.py
+    ├── services/
+    │   ├── __init__.py
+    │   ├── file_service.py            # extract_original_filename (puro, testabile)
+    │   ├── tag_service.py             # PendingTagManager (puro, testabile)
+    │   └── transfer_chain_service.py  # Catena copy/move persistente SQLite
     ├── auth_dialog.py         # Dialogo autenticazione iniziale (API ID, Hash, Phone)
     ├── channel_dialog.py      # Dialogo selezione canale Telegram con ricerca
     ├── main_window.py         # Finestra principale: explorer, tabella cloud, drop, tag
@@ -322,6 +360,20 @@ Il database verrà ricreato al prossimo avvio (i metadati saranno ripopolati al 
 
 ## 🛠️ Sviluppo
 
+### Quale script usare?
+
+I due gruppi di script servono a scenari **diversi** — non vanno eseguiti in sequenza.
+
+| | `scripts/install-*` | `scripts/build-*` |
+|---|---|---|
+| **A chi serve** | Sviluppatore / utente con Python | Developer che distribuisce l'app |
+| **Cosa produce** | Launcher globale `tgm-drive` | Eseguibile standalone in `dist/` |
+| **Richiede Python installato?** | Sì | Solo durante la build, non per l'utente finale |
+| **L'utente esegue** | `tgm-drive` da terminale | `./TGM-Drive` (doppio click su Windows) |
+| **Output** | `.venv/` + launcher in `~/.local/bin/` | `dist/TGM-Drive` (~40-80 MB, one-file) |
+
+> **Regola**: se vuoi sviluppare o contribuire → `install-*`. Se vuoi distribuire un `.exe` a utenti senza Python → `build-*`.
+
 ### Setup ambiente di sviluppo
 
 ```bash
@@ -334,17 +386,29 @@ pip install -r requirements.txt
 
 ### Avvio rapido (sviluppo)
 
-Dopo il setup, puoi usare il launcher globale `tgm-drive` installato con lo script, oppure avviare direttamente:
-
 ```bash
 source .venv/bin/activate  # solo la prima volta
 python main.py
+```
+
+### Test
+
+```bash
+source .venv/bin/activate
+pip install -r requirements-test.txt
+
+# Tutti i test
+python -m pytest tests/
+
+# Con coverage
+python -m pytest tests/ --cov=. --cov-report=term-missing
 ```
 
 ### Documentazione per sviluppatori
 
 - **[PROJECT_CONTEXT.md](PROJECT_CONTEXT.md)**: architettura, file structure, feature implementate, bug noti, comandi rapidi
 - **[TAG_SYSTEM_DESIGN.md](TAG_SYSTEM_DESIGN.md)**: progettazione dettagliata del sistema di tagging
+- **[TRANSFER_CHAIN_DESIGN.md](TRANSFER_CHAIN_DESIGN.md)**: progettazione catena copy/move persistente SQLite
 - **[GO_REFACTOR_DESIGN.md](GO_REFACTOR_DESIGN.md)**: studio di fattibilità per un refactoring Python → Go
 - **[FYNE_COMPROMISE.md](FYNE_COMPROMISE.md)**: analisi dei compromessi UI usando Fyne (Go) vs PyQt6 (Python)
 
@@ -354,6 +418,50 @@ python main.py
 - **Stile**: type hints dove utile, `dataclass` per strutture dati, `pyqtSignal` per comunicazione inter-thread
 - **Threading**: il client Telegram vive in un `QThread` dedicato con event loop asyncio. La GUI comunica via segnali Qt.
 - **Database**: SQLite in `~/.tgm_drive/files.db`, schema auto-migrante (`CREATE TABLE IF NOT EXISTS`, `ALTER TABLE` per nuove colonne)
+
+### Eseguibile standalone (PyInstaller)
+
+Puoi creare un eseguibile **one-file** che non richiede Python installato. Lo script di build:
+1. Crea un virtual environment (se non esiste)
+2. Installa tutte le dipendenze (`requirements.txt` + `pyinstaller`)
+3. Genera l'eseguibile in `dist/`
+
+#### Linux
+
+```bash
+chmod +x scripts/build-linux.sh
+./scripts/build-linux.sh
+# Output: dist/TGM-Drive
+```
+
+#### macOS
+
+```bash
+chmod +x scripts/build-macos.sh
+./scripts/build-macos.sh
+# Output: dist/TGM-Drive
+```
+
+> Per creare un `.app` bundle macOS, aggiungi `--windowed` al comando `pyinstaller` nello script.
+
+#### Windows (PowerShell)
+
+```powershell
+.\scripts\build-windows.ps1
+# Output: dist\TGM-Drive.exe
+```
+
+> Se PowerShell blocca l'esecuzione degli script:
+> ```powershell
+> Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+> ```
+
+#### Note
+
+- L'eseguibile pesa circa **40-80 MB** (include Python, PyQt6 e Telethon)
+- Il primo avvio potrebbe essere più lento (PyInstaller decomprime i file in una cartella temporanea)
+- I file di configurazione e database sono sempre in `~/.tgm_drive/`
+- Su Windows, l'estensione dell'eseguibile è `.exe`
 
 ---
 

@@ -41,5 +41,11 @@ Thumbs.db
 # Download temporanei
 TGM_Drive_Downloads/
 
+# Test & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
 # Launcher Windows generato dall'installer (contiene path locale)
 scripts/tgm-drive.bat
