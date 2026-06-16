@@ -28,10 +28,6 @@ jobs:
             add_data_sep: ';'
             gui_flag: '--noconsole'
 
-          - os: macos-13
-            name: macos-x64
-            add_data_sep: ':'
-            gui_flag: '--windowed'
 
           - os: macos-latest
             name: macos-arm64
