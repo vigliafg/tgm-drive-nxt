@@ -80,19 +80,11 @@ jobs:
             --hidden-import telethon.tl \
             main.py
 
-      - name: Normalize macOS .app bundle
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          if [ -d "dist/TGMDriveNXT.app" ]; then
-            mv "dist/TGMDriveNXT.app" "dist/TGMDriveNXT"
-          fi
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: tgm-drive-nxt-${{ matrix.name }}
-          path: dist/TGMDriveNXT${{ runner.os == 'Windows' && '.exe' || '' }}
+          path: dist/TGMDriveNXT*
           if-no-files-found: error
 
   release:
