@@ -4,11 +4,69 @@
 [![PyQt6](https://img.shields.io/badge/PyQt-6.4%2B-green)](https://riverbankcomputing.com/software/pyqt/)
 [![License](https://img.shields.io/badge/License-GPL--3.0-orange)](LICENSE)
 
+
+![Build](https://img.shields.io/github/actions/workflow/status/vigliafg/tgm-drive-nxt/build.yml?branch=main&label=build)
+![Release](https://img.shields.io/github/v/release/vigliafg/tgm-drive-nxt?color=blue)
+![License](https://img.shields.io/github/license/vigliafg/tgm-drive-nxt)
+
 **Trasforma un canale Telegram privato nel tuo cloud personale.**
 
 Applicazione desktop in **PyQt6** che trasforma uno o più canali Telegram privati in uno spazio cloud personale per l'upload e il download di file di qualsiasi tipo, con dimensione massima di **2 GB** (o **4 GB** con Telegram Premium).
 
 ---
+
+
+## 🚀 Download Pre-built Executables
+
+**No Python required!** Get the latest standalone executables from the [Releases page](https://github.com/vigliafg/tgm-drive-nxt/releases).
+
+| Platform | File |
+|----------|------|
+| 🐧 **Linux** x64 | `TGMDriveNXT-linux-x64` |
+| 🪟 **Windows** x64 | `TGMDriveNXT-windows-x64.exe` |
+| 🍎 **macOS** ARM64 | `TGMDriveNXT-macos-arm64` |
+
+### Quick start
+
+**Linux:**
+```bash
+chmod +x TGMDriveNXT-linux-x64
+./TGMDriveNXT-linux-x64
+```
+
+**macOS:**
+```bash
+chmod +x TGMDriveNXT-macos-arm64
+xattr -cr TGMDriveNXT-macos-arm64
+./TGMDriveNXT-macos-arm64
+```
+
+**Windows:** double-click `TGMDriveNXT-windows-x64.exe`.
+
+---
+
+## 🏗️ Automated Builds (CI/CD)
+
+Every push to `main` triggers an automated build via **GitHub Actions** that produces standalone executables for all three platforms with **PyInstaller** `--onefile`.
+
+| Platform | Runner | Architecture |
+|----------|--------|--------------|
+| 🐧 Linux | `ubuntu-24.04` | x86_64 |
+| 🪟 Windows | `windows-2022` | x86_64 |
+| 🍎 macOS | `macos-latest` | ARM64 (Apple Silicon) |
+
+### Creating a release
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Tagging triggers a build that automatically creates a **GitHub Release** with all three binaries attached — ready for download.
+The workflow is defined in [`.github/workflows/build.yml`](.github/workflows/build.yml).
+
+---
+
 
 ## 📸 Screenshot
 
