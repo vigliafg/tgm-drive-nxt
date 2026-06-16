@@ -1,4 +1,5 @@
 # Credenziali e file sensibili
+.env*
 cred.txt
 *.session
 *.session-journal
